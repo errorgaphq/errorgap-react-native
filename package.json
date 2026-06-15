@@ -1,0 +1,46 @@
+{
+  "name": "@errorgap/react-native",
+  "version": "0.1.0",
+  "description": "React Native notifier for Errorgap error tracking.",
+  "license": "MIT",
+  "author": "Errorgap",
+  "homepage": "https://gitlab.jgrubbs.net/jGRUBBS/errorgap-react-native",
+  "repository": {
+    "type": "git",
+    "url": "https://gitlab.jgrubbs.net/jGRUBBS/errorgap-react-native.git"
+  },
+  "keywords": ["errorgap", "react-native", "error-tracking", "exceptions", "monitoring"],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "react-native": ">=0.70"
+  },
+  "peerDependenciesMeta": {
+    "react-native": { "optional": true }
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsup": "^8.0.1",
+    "typescript": "^5.3.3",
+    "vitest": "^1.2.0"
+  }
+}
