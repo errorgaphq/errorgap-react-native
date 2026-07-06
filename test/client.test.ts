@@ -11,7 +11,7 @@ interface CapturedRequest {
 
 function installFakeFetch(): CapturedRequest[] {
   const captured: CapturedRequest[] = [];
-  globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+  globalThis.fetch = vi.fn(async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const headers: Record<string, string> = {};
     const raw = init?.headers as Record<string, string> | Headers | undefined;
     if (raw instanceof Headers) {

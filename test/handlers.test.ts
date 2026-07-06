@@ -7,7 +7,7 @@ interface CapturedRequest {
 
 function installFakeFetch(): CapturedRequest[] {
   const captured: CapturedRequest[] = [];
-  globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+  globalThis.fetch = vi.fn(async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     let body: unknown = init?.body;
     if (typeof init?.body === "string") {
       try { body = JSON.parse(init.body); } catch { /* leave */ }
