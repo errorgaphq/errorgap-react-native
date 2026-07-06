@@ -4,10 +4,10 @@
   "description": "React Native notifier for Errorgap error tracking.",
   "license": "MIT",
   "author": "Errorgap",
-  "homepage": "https://gitlab.jgrubbs.net/jGRUBBS/errorgap-react-native",
+  "homepage": "https://github.com/errorgaphq/errorgap-react-native",
   "repository": {
     "type": "git",
-    "url": "https://gitlab.jgrubbs.net/jGRUBBS/errorgap-react-native.git"
+    "url": "https://github.com/errorgaphq/errorgap-react-native.git"
   },
   "keywords": ["errorgap", "react-native", "error-tracking", "exceptions", "monitoring"],
   "type": "module",
