@@ -1,5 +1,8 @@
 import type { Configuration } from "./configuration.js";
 import { buildNotice, type NoticeContext, type NoticePayload } from "./notice.js";
+import { enrichBacktrace } from "./source-maps.js";
+import { transactionPayload, type Transaction } from "./apm.js";
+import { logLevelRank, normalizeLogLevel } from "./logs.js";
 import { VERSION } from "./version.js";
 
 export interface DeliveryResult {
@@ -7,6 +10,13 @@ export interface DeliveryResult {
   body?: string;
   error?: unknown;
   queued?: boolean;
+}
+
+export interface LogOptions {
+  source?: string;
+  environment?: string;
+  occurredAt?: string;
+  sync?: boolean;
 }
 
 export class Client {
@@ -28,12 +38,12 @@ export class Client {
       const notice = buildNotice(err, this.configuration, options);
 
       if (options.sync || !this.configuration.async) {
-        const p = this.deliver(notice);
+        const p = this.prepareAndDeliverNotice(notice);
         this.track(p);
         return await p;
       }
 
-      this.track(this.deliver(notice));
+      this.track(this.prepareAndDeliverNotice(notice));
       return { queued: true, status: 202 };
     } catch (exception) {
       this.log(exception);
@@ -41,8 +51,87 @@ export class Client {
     }
   }
 
-  async deliver(notice: NoticePayload): Promise<DeliveryResult> {
-    const url = noticesUrl(this.configuration);
+  /** Deliver an APM transaction (web interaction or background job). */
+  async notifyTransaction(
+    transaction: Transaction,
+    options: { sync?: boolean } = {},
+  ): Promise<DeliveryResult> {
+    try {
+      this.configuration.validate();
+    } catch (exception) {
+      this.log(exception);
+      return { error: exception };
+    }
+    if (!this.configuration.apmEnabled) {
+      return { status: 204 };
+    }
+    const rate = this.configuration.apmSampleRate;
+    if (!(rate >= 1 || (rate > 0 && Math.random() < rate))) {
+      return { status: 204 };
+    }
+    const payload = transactionPayload(transaction, this.configuration);
+    return this.submit("transactions", payload, options.sync);
+  }
+
+  /** Deliver a structured log line. */
+  async notifyLog(
+    message: string,
+    level = "info",
+    options: LogOptions = {},
+  ): Promise<DeliveryResult> {
+    try {
+      this.configuration.validate();
+    } catch (exception) {
+      this.log(exception);
+      return { error: exception };
+    }
+    const normalizedLevel = normalizeLogLevel(level);
+    if (
+      !this.configuration.logsEnabled ||
+      logLevelRank(normalizedLevel) <
+        logLevelRank(normalizeLogLevel(this.configuration.minimumLogLevel))
+    ) {
+      return { status: 204 };
+    }
+    const payload: Record<string, unknown> = {
+      message,
+      level: normalizedLevel,
+      environment: options.environment ?? this.configuration.environment,
+      occurred_at: options.occurredAt ?? new Date().toISOString(),
+    };
+    if (options.source) payload.source = options.source;
+    return this.submit("logs", payload, options.sync);
+  }
+
+  private async prepareAndDeliverNotice(notice: NoticePayload): Promise<DeliveryResult> {
+    if (this.configuration.sourceMaps) {
+      try {
+        for (const error of notice.errors) {
+          error.backtrace = await enrichBacktrace(error.backtrace);
+        }
+      } catch {
+        // Source-map enrichment is best-effort; deliver the raw frames.
+      }
+    }
+    return this.deliver("notices", notice);
+  }
+
+  private async submit(
+    resource: string,
+    payload: Record<string, unknown>,
+    sync = false,
+  ): Promise<DeliveryResult> {
+    if (sync || !this.configuration.async) {
+      const p = this.deliver(resource, payload);
+      this.track(p);
+      return await p;
+    }
+    this.track(this.deliver(resource, payload));
+    return { queued: true, status: 202 };
+  }
+
+  async deliver(resource: string, payload: unknown): Promise<DeliveryResult> {
+    const url = resourceUrl(this.configuration, resource);
     const headers: Record<string, string> = {
       "content-type": "application/json",
       "user-agent": `errorgap-react-native/${VERSION}`,
@@ -55,7 +144,7 @@ export class Client {
       const response = await fetch(url, {
         method: "POST",
         headers,
-        body: JSON.stringify(notice),
+        body: JSON.stringify(payload),
       });
       const body = await safeBody(response);
       return { status: response.status, body };
@@ -88,11 +177,11 @@ export class Client {
   }
 }
 
-function noticesUrl(configuration: Configuration): string {
+function resourceUrl(configuration: Configuration, resource: string): string {
   const base = configuration.endpoint.endsWith("/")
     ? configuration.endpoint.slice(0, -1)
     : configuration.endpoint;
-  return `${base}/api/projects/${configuration.projectSlug}/notices`;
+  return `${base}/api/projects/${configuration.projectSlug}/${resource}`;
 }
 
 async function safeBody(response: Response): Promise<string> {

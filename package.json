@@ -1,6 +1,6 @@
 {
   "name": "@errorgap/react-native",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "React Native notifier for Errorgap error tracking.",
   "license": "MIT",
   "author": "Errorgap",
@@ -36,6 +36,9 @@
   },
   "peerDependenciesMeta": {
     "react-native": { "optional": true }
+  },
+  "dependencies": {
+    "@jridgewell/trace-mapping": "^0.3.31"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

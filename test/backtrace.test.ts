@@ -40,3 +40,29 @@ describe("parseBacktrace", () => {
     expect(frames[0]?.in_app).toBe(false);
   });
 });
+
+describe("parseBacktrace header handling", () => {
+  it("skips the error header line for custom error names", () => {
+    const err = new Error("boom");
+    err.name = "CheckoutError";
+    err.stack = [
+      "CheckoutError: React Native SDK checkout failed after 3 attempts",
+      "    at checkout (src/services/checkout.ts:29:11)",
+    ].join("\n");
+    const frames = parseBacktrace(err);
+    expect(frames).toHaveLength(1);
+    expect(frames[0]?.function).toBe("checkout");
+    expect(frames[0]?.file).toBe("src/services/checkout.ts");
+  });
+
+  it("skips Hermes header lines without a call-site marker", () => {
+    const err = new Error("x");
+    err.stack = [
+      "TypeError: Cannot read properties of undefined (reading 'displayName')",
+      "onRender@http://127.0.0.1:8081/index.bundle:120:15",
+    ].join("\n");
+    const frames = parseBacktrace(err);
+    expect(frames).toHaveLength(1);
+    expect(frames[0]?.function).toBe("onRender");
+  });
+});

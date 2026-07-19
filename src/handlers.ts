@@ -1,4 +1,5 @@
 import type { Client } from "./client.js";
+import type { BreadcrumbBuffer } from "./breadcrumbs.js";
 
 interface ErrorUtilsLike {
   setGlobalHandler(handler: (error: Error, isFatal?: boolean) => void): void;
@@ -16,9 +17,11 @@ let rejectionHandler: ((reason: unknown) => void) | null = null;
  * Safe to call from non-RN environments: the function feature-detects
  * `ErrorUtils` on the global object and silently skips when missing.
  */
-export function installGlobalHandlers(client: Client): void {
+export function installGlobalHandlers(client: Client, breadcrumbs?: BreadcrumbBuffer): void {
   if (installed) return;
   installed = true;
+
+  const snapshot = () => breadcrumbs?.snapshot() ?? [];
 
   const errorUtils = getErrorUtils();
   if (errorUtils) {
@@ -27,6 +30,7 @@ export function installGlobalHandlers(client: Client): void {
       void client.notify(error, {
         sync: true,
         context: { source: "ErrorUtils.setGlobalHandler" },
+        breadcrumbs: snapshot(),
         isFatal,
       });
       previousErrorUtilsHandler?.(error, isFatal);
@@ -36,6 +40,7 @@ export function installGlobalHandlers(client: Client): void {
   rejectionHandler = (reason: unknown) => {
     void client.notify(reason, {
       context: { source: "unhandledrejection" },
+      breadcrumbs: snapshot(),
     });
   };
   // RN polyfills `process` in some environments; node/jest envs also have it.

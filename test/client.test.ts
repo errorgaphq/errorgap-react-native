@@ -108,3 +108,71 @@ describe("Client", () => {
     expect(requests).toHaveLength(1);
   });
 });
+
+describe("Client logs and transactions", () => {
+  let requests: CapturedRequest[];
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    requests = installFakeFetch();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  function cfg(overrides: Record<string, unknown> = {}) {
+    return new Configuration({
+      endpoint: "https://errorgap.example.com",
+      projectSlug: "demo",
+      apiKey: "flk_test",
+      async: false,
+      ...overrides,
+    });
+  }
+
+  it("POSTs a structured log to /logs", async () => {
+    const client = new Client(cfg());
+    const result = await client.notifyLog("gateway timeout", "error", {
+      source: "payments",
+      sync: true,
+    });
+    expect(result.status).toBe(201);
+    const req = requests[0]!;
+    expect(req.url).toBe("https://errorgap.example.com/api/projects/demo/logs");
+    expect(req.body).toMatchObject({ message: "gateway timeout", level: "error", source: "payments" });
+  });
+
+  it("drops logs below the minimum level without delivering", async () => {
+    const client = new Client(cfg({ minimumLogLevel: "warn" }));
+    const result = await client.notifyLog("chatty", "info", { sync: true });
+    expect(result.status).toBe(204);
+    expect(requests).toHaveLength(0);
+  });
+
+  it("POSTs an APM transaction to /transactions", async () => {
+    const client = new Client(cfg());
+    const result = await client.notifyTransaction(
+      { kind: "web", method: "GET", path: "/orders/{id}", pathRaw: "/orders/1", durationMs: 10 },
+      { sync: true },
+    );
+    expect(result.status).toBe(201);
+    const req = requests[0]!;
+    expect(req.url).toBe("https://errorgap.example.com/api/projects/demo/transactions");
+    expect(req.body).toMatchObject({ kind: "web", path: "/orders/{id}", path_raw: "/orders/1", duration_ms: 10 });
+  });
+
+  it("skips transactions when APM is disabled", async () => {
+    const client = new Client(cfg({ apmEnabled: false }));
+    const result = await client.notifyTransaction({ durationMs: 5 }, { sync: true });
+    expect(result.status).toBe(204);
+    expect(requests).toHaveLength(0);
+  });
+
+  it("drops transactions when the sample rate is zero", async () => {
+    const client = new Client(cfg({ apmSampleRate: 0 }));
+    const result = await client.notifyTransaction({ durationMs: 5 }, { sync: true });
+    expect(result.status).toBe(204);
+    expect(requests).toHaveLength(0);
+  });
+});
