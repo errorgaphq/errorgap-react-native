@@ -1,6 +1,6 @@
 {
   "name": "@errorgap/react-native",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "React Native notifier for Errorgap error tracking.",
   "license": "MIT",
   "author": "Errorgap",
@@ -9,7 +9,13 @@
     "type": "git",
     "url": "https://github.com/errorgaphq/errorgap-react-native.git"
   },
-  "keywords": ["errorgap", "react-native", "error-tracking", "exceptions", "monitoring"],
+  "keywords": [
+    "errorgap",
+    "react-native",
+    "error-tracking",
+    "exceptions",
+    "monitoring"
+  ],
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -22,7 +28,11 @@
     },
     "./package.json": "./package.json"
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -35,7 +45,9 @@
     "react-native": ">=0.70"
   },
   "peerDependenciesMeta": {
-    "react-native": { "optional": true }
+    "react-native": {
+      "optional": true
+    }
   },
   "dependencies": {
     "@jridgewell/trace-mapping": "^0.3.31"

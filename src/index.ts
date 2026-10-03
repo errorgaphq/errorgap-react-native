@@ -5,6 +5,12 @@ import { BreadcrumbBuffer, type BreadcrumbInput } from "./breadcrumbs.js";
 import { SpanCollector, type Transaction } from "./apm.js";
 import type { NoticeContext } from "./notice.js";
 import { VERSION } from "./version.js";
+import {
+  beginTransaction,
+  currentTransactionId,
+  endTransaction,
+  newTransactionId,
+} from "./transaction-context.js";
 
 export type { ConfigurationInput, Logger } from "./configuration.js";
 export type { NoticeContext, NoticePayload, NoticeCause } from "./notice.js";
@@ -21,6 +27,7 @@ export {
   normalizeSql,
 } from "./apm.js";
 export { BreadcrumbBuffer } from "./breadcrumbs.js";
+export { currentTransactionId, newTransactionId } from "./transaction-context.js";
 export { VERSION };
 
 let configuration = new Configuration();
@@ -88,15 +95,19 @@ async function trackTransaction<T>(
   meta: Omit<Transaction, "durationMs" | "spans" | "kind"> & { kind?: string },
   operation: (spans: SpanCollector) => Promise<T> | T,
 ): Promise<T> {
-  const spans = new SpanCollector();
+  const id = meta.id ?? newTransactionId();
+  const spans = new SpanCollector(id);
   const startedAt = new Date().toISOString();
   const start = Date.now();
+  beginTransaction(id);
   try {
     return await operation(spans);
   } finally {
+    endTransaction(id);
     void notifyTransaction({
       kind: meta.kind ?? "web",
       ...meta,
+      id,
       occurredAt: meta.occurredAt ?? startedAt,
       durationMs: Date.now() - start,
       spans: spans.snapshot(),
@@ -113,13 +124,17 @@ async function trackJob<T>(
   operation: (spans: SpanCollector) => Promise<T> | T,
   meta: { queue?: string; environment?: string } = {},
 ): Promise<T> {
-  const spans = new SpanCollector();
+  const id = newTransactionId();
+  const spans = new SpanCollector(id);
   const startedAt = new Date().toISOString();
   const start = Date.now();
+  beginTransaction(id);
   try {
     return await operation(spans);
   } finally {
+    endTransaction(id);
     void notifyTransaction({
+      id,
       kind: "job",
       jobClass,
       queue: meta.queue ?? "default",
@@ -146,6 +161,7 @@ function getClient(): Client {
 export const Errorgap = {
   init,
   notify,
+  currentTransactionId,
   addBreadcrumb,
   clearBreadcrumbs,
   log,
