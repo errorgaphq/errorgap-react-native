@@ -4,6 +4,7 @@ import { enrichBacktrace } from "./source-maps.js";
 import { transactionPayload, type Transaction } from "./apm.js";
 import { logLevelRank, normalizeLogLevel } from "./logs.js";
 import { VERSION } from "./version.js";
+import { currentTransactionId } from "./transaction-context.js";
 
 export interface DeliveryResult {
   status?: number;
@@ -35,7 +36,7 @@ export class Client {
     try {
       this.configuration.validate();
       const err = coerceError(error);
-      const notice = buildNotice(err, this.configuration, options);
+      const notice = buildNotice(err, this.configuration, withTransaction(options));
 
       if (options.sync || !this.configuration.async) {
         const p = this.prepareAndDeliverNotice(notice);
@@ -204,4 +205,14 @@ function coerceError(error: unknown): Error {
     return err;
   }
   return new Error(String(error));
+}
+
+/**
+ * The transaction this error was raised in (when that is unambiguous), unless
+ * the caller set one, so errorgap links the two.
+ */
+function withTransaction<T extends NoticeContext>(options: T): T {
+  const id = currentTransactionId();
+  if (!id || (options.context && "transaction_id" in options.context)) return options;
+  return { ...options, context: { ...(options.context ?? {}), transaction_id: id } };
 }

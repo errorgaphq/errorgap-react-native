@@ -111,6 +111,25 @@ await Errorgap.trackJob("ReceiptJob", async (spans) => {
 if it throws. Use `Errorgap.notifyTransaction(...)` for a pre-measured
 transaction.
 
+### Link errors to their transaction
+
+Each transaction has an id. An error reported while exactly one
+`trackTransaction`/`trackJob` callback is running carries it as
+`context.transaction_id`, so errorgap shows the error that interaction raised
+on its trace. React Native has no async-local storage, so when transactions
+overlap no id is attached rather than a possibly wrong one; pass it explicitly
+from the callback instead:
+
+```ts
+await Errorgap.trackTransaction({ path: "/checkout" }, async (spans) => {
+  try {
+    await submitOrder();
+  } catch (error) {
+    await Errorgap.notify(error, { context: { transaction_id: spans.transactionId } });
+  }
+});
+```
+
 ## Configuration reference
 
 | Option | Default | Notes |
