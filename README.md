@@ -111,6 +111,26 @@ await Errorgap.trackJob("ReceiptJob", async (spans) => {
 if it throws. Use `Errorgap.notifyTransaction(...)` for a pre-measured
 transaction.
 
+### Link API calls to server traces
+
+Trace a call to your API and errorgap links it to the server request that
+answered it (when the server's errorgap SDK records the `x-errorgap-trace`
+header — Rails, Laravel, Express, Django, Spring and the rest do):
+
+```ts
+await Errorgap.trackTransaction({ method: "GET", path: "OrderScreen" }, async (spans) => {
+  const res = await spans.traceCall("GET /api/orders/7", (headers) =>
+    fetch(`${API}/orders/7`, { headers }),
+  );
+  // ...
+});
+```
+
+`traceCall` records an `http` span carrying the trace id it sent; the app's
+trace lists each traced call with a link to its server trace, and the server
+trace shows how long the app waited. For manual timing use
+`const call = spans.startCall(label)`, send `call.headers`, then `call.finish()`.
+
 ### Link errors to their transaction
 
 Each transaction has an id. An error reported while exactly one

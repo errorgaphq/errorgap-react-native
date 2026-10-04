@@ -17,7 +17,7 @@ export type { NoticeContext, NoticePayload, NoticeCause } from "./notice.js";
 export type { BacktraceFrame, SourceExcerpt } from "./backtrace.js";
 export type { DeliveryResult, LogOptions } from "./client.js";
 export type { Breadcrumb, BreadcrumbInput } from "./breadcrumbs.js";
-export type { Span, SpanLocation, Transaction } from "./apm.js";
+export type { Span, SpanLocation, TracedCall, Transaction } from "./apm.js";
 export { Configuration } from "./configuration.js";
 export { Client } from "./client.js";
 export {
@@ -25,6 +25,7 @@ export {
   databaseSpan,
   externalSpan,
   normalizeSql,
+  TRACE_HEADER,
 } from "./apm.js";
 export { BreadcrumbBuffer } from "./breadcrumbs.js";
 export { currentTransactionId, newTransactionId } from "./transaction-context.js";

@@ -1,4 +1,8 @@
 import type { Configuration } from "./configuration.js";
+import { newTransactionId } from "./transaction-context.js";
+
+/** The header that links an API call to the server request answering it. */
+export const TRACE_HEADER = "x-errorgap-trace";
 
 export interface Span {
   kind: string;
@@ -7,6 +11,21 @@ export interface Span {
   line?: number;
   function?: string;
   durationMs: number;
+  /**
+   * For a traced `http` call: the id sent in its `x-errorgap-trace` header.
+   * The server request that recorded the header links to it.
+   */
+  traceId?: string;
+}
+
+/** A traced outbound call in flight; see {@link SpanCollector.startCall}. */
+export interface TracedCall {
+  /** The id sent with the call. */
+  readonly traceId: string;
+  /** Headers to add to the request: `{ "x-errorgap-trace": traceId }`. */
+  readonly headers: Record<string, string>;
+  /** Record the call's span, timed from `startCall`. Idempotent. */
+  finish(): void;
 }
 
 export interface SpanLocation {
@@ -47,6 +66,50 @@ export class SpanCollector {
 
   external(durationMs: number, location: SpanLocation = {}): void {
     this.add(externalSpan(durationMs, location));
+  }
+
+  /**
+   * Start a traced API call. Send `call.headers` with the request and call
+   * `call.finish()` when the response arrives: the `http` span records the
+   * trace id, and a server SDK that records the header links the server
+   * request to it.
+   */
+  startCall(label: string, location: SpanLocation = {}): TracedCall {
+    const traceId = newTransactionId();
+    const start = now();
+    let finished = false;
+    return {
+      traceId,
+      headers: { [TRACE_HEADER]: traceId },
+      finish: () => {
+        if (finished) return;
+        finished = true;
+        this.add({ ...externalSpan(now() - start, location), function: label, traceId });
+      },
+    };
+  }
+
+  /**
+   * Time a traced API call: `fn` gets the headers to send and its result is
+   * returned. The span is recorded even if `fn` throws.
+   *
+   * ```ts
+   * const res = await spans.traceCall("GET /api/orders/7", (headers) =>
+   *   fetch(`${API}/orders/7`, { headers }),
+   * );
+   * ```
+   */
+  async traceCall<T>(
+    label: string,
+    fn: (headers: Record<string, string>) => Promise<T> | T,
+    location: SpanLocation = {},
+  ): Promise<T> {
+    const call = this.startCall(label, location);
+    try {
+      return await fn(call.headers);
+    } finally {
+      call.finish();
+    }
   }
 
   snapshot(): Span[] {
@@ -104,6 +167,7 @@ function spanPayload(span: Span): Record<string, unknown> {
   if (span.file !== undefined) payload.file = span.file;
   if (span.line !== undefined) payload.line = span.line;
   if (span.function !== undefined) payload.fn_name = span.function;
+  if (span.traceId !== undefined) payload.trace_id = span.traceId;
   return payload;
 }
 
@@ -114,4 +178,10 @@ export function normalizeSql(sql: string): string {
     .replace(/\b\d+(?:\.\d+)?\b/g, "?")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function now(): number {
+  return typeof performance !== "undefined" && typeof performance.now === "function"
+    ? performance.now()
+    : Date.now();
 }
