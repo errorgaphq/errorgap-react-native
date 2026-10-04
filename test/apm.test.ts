@@ -97,3 +97,38 @@ describe("transactionPayload", () => {
     });
   });
 });
+
+describe("traced calls", () => {
+  it("records the trace id it sends on the call's http span", async () => {
+    const spans = new SpanCollector();
+    let sent: Record<string, string> = {};
+    const result = await spans.traceCall("GET /api/orders/7", async (headers) => {
+      sent = headers;
+      return "ok";
+    });
+    expect(result).toBe("ok");
+    const [span] = spans.snapshot();
+    expect(span!.kind).toBe("http");
+    expect(span!.function).toBe("GET /api/orders/7");
+    expect(span!.traceId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(sent).toEqual({ "x-errorgap-trace": span!.traceId });
+  });
+
+  it("records the span when the call throws, once", async () => {
+    const spans = new SpanCollector();
+    await expect(spans.traceCall("POST /api/pay", () => Promise.reject(new Error("offline")))).rejects.toThrow("offline");
+    const call = spans.startCall("GET /api/menu");
+    call.finish();
+    call.finish();
+    expect(spans.snapshot().map((s) => s.function)).toEqual(["POST /api/pay", "GET /api/menu"]);
+  });
+
+  it("sends trace_id in the transaction payload", () => {
+    const spans = new SpanCollector();
+    spans.startCall("GET /x").finish();
+    const payload = transactionPayload({ durationMs: 1, spans: spans.snapshot() }, new Configuration({ projectSlug: "demo" }));
+    const [span] = payload.spans as Array<Record<string, unknown>>;
+    expect(span!.trace_id).toBe(spans.snapshot()[0]!.traceId);
+    expect(span!.fn_name).toBe("GET /x");
+  });
+});
