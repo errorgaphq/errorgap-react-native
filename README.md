@@ -150,6 +150,40 @@ await Errorgap.trackTransaction({ path: "/checkout" }, async (spans) => {
 });
 ```
 
+## Session replay
+
+Session replay records a timeline of each app session, shown on error groups
+and incidents in Errorgap. On mobile it is **timeline only**: no screenshots
+and no view snapshots.
+
+| Event | Recorded when |
+|---|---|
+| `page_load` | The app starts ("App started"), or a new session starts after 30 minutes in the background ("App opened") |
+| `navigation` | A screen is tracked, or the app returns from the background |
+| `api_error` | A `fetch` call fails or answers 5xx |
+| `error` | An error is reported, linked to its error group |
+| `exit` | The app goes to the background |
+
+Whether anything is recorded is set per project in **Settings → Session
+replay**, not in code: nothing is recorded while replay is off, and a sampled
+share of sessions while it is on.
+
+Record screens with React Navigation:
+
+```tsx
+import { NavigationContainer, useNavigationContainerRef } from "@react-navigation/native";
+import { Errorgap } from "@errorgap/react-native";
+
+const ref = useNavigationContainerRef();
+const onNavigation = Errorgap.errorgapNavigationListener(ref);
+
+<NavigationContainer ref={ref} onReady={onNavigation} onStateChange={onNavigation}>
+```
+
+Or call `Errorgap.trackScreen("Checkout")` from your own navigator. Turn replay
+off in one app with `Errorgap.init({ /* ... */, replay: false })`, and name the
+app in the session list with `replay: { appName: "Acme" }`.
+
 ## Configuration reference
 
 | Option | Default | Notes |
