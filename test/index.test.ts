@@ -30,6 +30,7 @@ describe("Errorgap top-level API", () => {
   beforeEach(() => {
     requests = installFakeFetch();
     Errorgap.init({
+      replay: false,
       endpoint: "https://errorgap.example.com",
       projectSlug: "demo",
       apiKey: "flk_test",

@@ -3,6 +3,7 @@ import { Client, type DeliveryResult, type LogOptions } from "./client.js";
 import { installGlobalHandlers, uninstallGlobalHandlers } from "./handlers.js";
 import { BreadcrumbBuffer, type BreadcrumbInput } from "./breadcrumbs.js";
 import { SpanCollector, type Transaction } from "./apm.js";
+import { ReplayRecorder, type ReplayOptions } from "./replay.js";
 import type { NoticeContext } from "./notice.js";
 import { VERSION } from "./version.js";
 import {
@@ -18,6 +19,7 @@ export type { BacktraceFrame, SourceExcerpt } from "./backtrace.js";
 export type { DeliveryResult, LogOptions } from "./client.js";
 export type { Breadcrumb, BreadcrumbInput } from "./breadcrumbs.js";
 export type { Span, SpanLocation, TracedCall, Transaction } from "./apm.js";
+export type { ReplayOptions, AppStateLike, PlatformLike } from "./replay.js";
 export { Configuration } from "./configuration.js";
 export { Client } from "./client.js";
 export {
@@ -34,14 +36,21 @@ export { VERSION };
 let configuration = new Configuration();
 let client = new Client(configuration);
 let breadcrumbs = new BreadcrumbBuffer(configuration.maxBreadcrumbs);
+let replay: ReplayRecorder | undefined;
 
 export interface InitOptions extends ConfigurationInput {
   /** Install ErrorUtils.setGlobalHandler + unhandledRejection. Default true. */
   captureGlobals?: boolean;
+  /**
+   * Session replay (timeline only). On by default, but it records only what
+   * the project's replay settings allow (Settings → Session replay). `false`
+   * turns it off in this app whatever the settings say.
+   */
+  replay?: boolean | ReplayOptions;
 }
 
 function init(options: InitOptions = {}): void {
-  const { captureGlobals = true, ...rest } = options;
+  const { captureGlobals = true, replay: replayOption = true, ...rest } = options;
   configuration = new Configuration(rest);
   client.configure(configuration);
   breadcrumbs = new BreadcrumbBuffer(configuration.maxBreadcrumbs);
@@ -50,6 +59,43 @@ function init(options: InitOptions = {}): void {
   } else {
     uninstallGlobalHandlers();
   }
+  replay?.stop();
+  replay = undefined;
+  client.observeErrors(undefined);
+  if (replayOption) {
+    try {
+      configuration.validate();
+      const recorder = new ReplayRecorder(configuration, replayOption === true ? {} : replayOption);
+      replay = recorder;
+      client.observeErrors((label) => recorder.errorStarted(label));
+      recorder.start();
+    } catch (error) {
+      configuration.logger?.warn(
+        `[errorgap] session replay not started: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+}
+
+/**
+ * Record the screen now showing in the session replay timeline. Call it from
+ * your navigator, or use `errorgapNavigationListener` with React Navigation.
+ */
+function trackScreen(name: string): void {
+  replay?.screen(name);
+}
+
+/**
+ * For React Navigation: pass as both `onReady` and `onStateChange` of
+ * `NavigationContainer`, with the container's ref, to record each screen.
+ */
+function errorgapNavigationListener(navigationRef: {
+  getCurrentRoute?: () => { name?: string } | undefined;
+}): () => void {
+  return () => {
+    const name = navigationRef.getCurrentRoute?.()?.name;
+    if (name) trackScreen(name);
+  };
 }
 
 function notify(
@@ -170,6 +216,8 @@ export const Errorgap = {
   trackTransaction,
   trackJob,
   flush,
+  trackScreen,
+  errorgapNavigationListener,
   configuration: getConfiguration,
   client: getClient,
   VERSION,
@@ -185,4 +233,6 @@ export {
   trackTransaction,
   trackJob,
   flush,
+  trackScreen,
+  errorgapNavigationListener,
 };

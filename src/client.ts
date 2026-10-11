@@ -20,10 +20,19 @@ export interface LogOptions {
   sync?: boolean;
 }
 
+/** Told when an error is reported; returns what to call with its group id. */
+export type ErrorObserver = (label: string) => (groupId?: string) => void;
+
 export class Client {
   private pending = new Set<Promise<unknown>>();
+  private errorObserver: ErrorObserver | undefined;
 
   constructor(private configuration: Configuration) {}
+
+  /** Session replay records each reported error, linked to its group. */
+  observeErrors(observer: ErrorObserver | undefined): void {
+    this.errorObserver = observer;
+  }
 
   configure(configuration: Configuration): void {
     this.configuration = configuration;
@@ -37,14 +46,16 @@ export class Client {
       this.configuration.validate();
       const err = coerceError(error);
       const notice = buildNotice(err, this.configuration, withTransaction(options));
+      const observed = this.observe(`${notice.errors[0]?.type ?? "Error"}: ${err.message}`);
+      const delivery = this.prepareAndDeliverNotice(notice).then((result) => {
+        observed(groupIdOf(result));
+        return result;
+      });
+      this.track(delivery);
 
       if (options.sync || !this.configuration.async) {
-        const p = this.prepareAndDeliverNotice(notice);
-        this.track(p);
-        return await p;
+        return await delivery;
       }
-
-      this.track(this.prepareAndDeliverNotice(notice));
       return { queued: true, status: 202 };
     } catch (exception) {
       this.log(exception);
@@ -102,6 +113,14 @@ export class Client {
     };
     if (options.source) payload.source = options.source;
     return this.submit("logs", payload, options.sync);
+  }
+
+  private observe(label: string): (groupId?: string) => void {
+    try {
+      return this.errorObserver?.(label) ?? (() => undefined);
+    } catch {
+      return () => undefined;
+    }
   }
 
   private async prepareAndDeliverNotice(notice: NoticePayload): Promise<DeliveryResult> {
@@ -215,4 +234,14 @@ function withTransaction<T extends NoticeContext>(options: T): T {
   const id = currentTransactionId();
   if (!id || (options.context && "transaction_id" in options.context)) return options;
   return { ...options, context: { ...(options.context ?? {}), transaction_id: id } };
+}
+
+function groupIdOf(result: DeliveryResult): string | undefined {
+  if (!result.body) return undefined;
+  try {
+    const parsed = JSON.parse(result.body) as { group_id?: unknown };
+    return typeof parsed.group_id === "string" ? parsed.group_id : undefined;
+  } catch {
+    return undefined;
+  }
 }

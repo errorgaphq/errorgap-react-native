@@ -36,6 +36,7 @@ describe("ErrorUtils integration", () => {
       getGlobalHandler: vi.fn(() => undefined),
     };
     Errorgap.init({
+      replay: false,
       endpoint: "https://errorgap.example.com",
       projectSlug: "demo",
       apiKey: "flk_test",

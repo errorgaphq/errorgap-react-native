@@ -17,6 +17,7 @@ describe("transaction ids", () => {
       return new Response("{}", { status: 201 });
     }) as unknown as typeof fetch;
     Errorgap.init({
+      replay: false,
       endpoint: "https://errorgap.example.com",
       projectSlug: "demo",
       apiKey: "egp_test",
