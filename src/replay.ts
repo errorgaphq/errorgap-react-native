@@ -8,6 +8,11 @@ import type { Configuration } from "./configuration.js";
  * The project's replay settings decide whether a session is recorded: the
  * recorder reads them when a session starts and records a sampled share of
  * sessions while replay is on.
+ *
+ * Only sessions that hit an error are kept: a session's events are held and
+ * nothing is sent until an error is reported; then everything held goes up
+ * and the rest of the session follows. A session that ends without an error
+ * is never sent.
  */
 
 /** The parts of React Native's `AppState` the recorder uses. */
@@ -46,6 +51,8 @@ type FetchInput = Parameters<typeof fetch>[0];
 export const BACKGROUND_TIMEOUT_MS = 30 * 60 * 1000;
 export const MAX_BATCH_EVENTS = 200;
 const MAX_BUFFERED_EVENTS = 1000;
+/** Before the session's first error, only the most recent events are held. */
+export const MAX_PENDING_EVENTS = 300;
 const MAX_LABEL = 200;
 
 /**
@@ -121,7 +128,8 @@ export class ReplayRecorder {
   }
 
   flush(final: boolean): void {
-    if (this.state !== "recording") return;
+    // No error yet: keep holding.
+    if (this.state !== "recording" || !this.hadError) return;
     do {
       const events = this.events.splice(0, MAX_BATCH_EVENTS);
       if (events.length === 0 && !final) return;
@@ -180,7 +188,10 @@ export class ReplayRecorder {
   // ── Events ─────────────────────────────────────────────────────────────────
 
   private push(event: Omit<ReplayEvent, "t"> & { t?: number }): void {
-    if (!this.active() || this.events.length >= MAX_BUFFERED_EVENTS) return;
+    if (!this.active()) return;
+    // Before an error, the recent past matters most: drop the oldest.
+    if (!this.hadError && this.events.length >= MAX_PENDING_EVENTS) this.events.shift();
+    if (this.events.length >= MAX_BUFFERED_EVENTS) return;
     const label = event.label.length > MAX_LABEL ? `${event.label.slice(0, MAX_LABEL - 1)}…` : event.label;
     this.events.push({ ...event, t: event.t ?? this.offset(), label });
   }

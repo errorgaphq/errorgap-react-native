@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Errorgap } from "../src/index.js";
-import { BACKGROUND_TIMEOUT_MS, type AppStateLike } from "../src/replay.js";
+import { BACKGROUND_TIMEOUT_MS, MAX_PENDING_EVENTS, type AppStateLike } from "../src/replay.js";
 
 interface Sent {
   url: string;
@@ -111,11 +111,12 @@ describe("React Native session replay", () => {
     const appState = init();
     await settle();
 
+    await Errorgap.notify(new Error("first"), { sync: true });
     appState.emit("background");
     await settle();
     const firstId = batches(sent)[0]!.body.session.id;
     expect(events(sent).slice(-1)[0]).toMatchObject({ type: "exit", label: "App went to the background" });
-    expect(batches(sent).slice(-1)[0]!.body.session.outcome).toBe("completed");
+    expect(batches(sent).slice(-1)[0]!.body.session.outcome).toBe("error");
 
     const now = Date.now();
     vi.spyOn(Date, "now").mockReturnValue(now + BACKGROUND_TIMEOUT_MS + 1000);
@@ -143,6 +144,32 @@ describe("React Native session replay", () => {
 
     expect(new Set(batches(sent).map((b) => b.body.session.id)).size).toBe(1);
     expect(events(sent).map((e) => e.label)).toContain("Returned to the app");
+  });
+
+  it("sends nothing for a session without an error", async () => {
+    const sent = fakeServer({}, 503);
+    const appState = init();
+    await settle();
+    Errorgap.trackScreen("Checkout");
+    await fetch("https://api.acme.example/cart");
+    appState.emit("background");
+    await settle();
+
+    expect(batches(sent)).toHaveLength(0);
+  });
+
+  it("holds only the most recent events before an error", async () => {
+    const sent = fakeServer({});
+    init();
+    await settle();
+    for (let i = 0; i < MAX_PENDING_EVENTS + 20; i++) Errorgap.trackScreen(`Screen ${i}`);
+    await Errorgap.notify(new Error("boom"), { sync: true });
+    await settle();
+
+    const before = events(sent).filter((e) => e.type !== "error");
+    expect(before).toHaveLength(MAX_PENDING_EVENTS);
+    // "App started" plus 320 screens: the oldest 21 are dropped.
+    expect(before[0]).toMatchObject({ label: "Opened Screen 20" });
   });
 
   it("stops recording the session when the server refuses it", async () => {
