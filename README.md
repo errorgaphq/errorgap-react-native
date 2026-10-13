@@ -168,6 +168,11 @@ Whether anything is recorded is set per project in **Settings → Session
 replay**, not in code: nothing is recorded while replay is off, and a sampled
 share of sessions while it is on.
 
+Only sessions that hit an error are kept. Until an error is reported, the
+session's most recent 300 events are held in memory and nothing is sent; then
+everything held goes up with the error and the rest of the session follows. A
+session that ends without an error is never sent.
+
 Record screens with React Navigation:
 
 ```tsx
