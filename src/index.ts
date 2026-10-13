@@ -13,8 +13,9 @@ import {
   newTransactionId,
 } from "./transaction-context.js";
 
-export type { ConfigurationInput, Logger } from "./configuration.js";
-export type { NoticeContext, NoticePayload, NoticeCause } from "./notice.js";
+export type { BeforeNotify, ConfigurationInput, Logger, NoticeStorage } from "./configuration.js";
+export type { FilterKey } from "./filter.js";
+export type { NoticeContext, NoticePayload, NoticeCause, NoticeUser } from "./notice.js";
 export type { BacktraceFrame, SourceExcerpt } from "./backtrace.js";
 export type { DeliveryResult, LogOptions } from "./client.js";
 export type { Breadcrumb, BreadcrumbInput } from "./breadcrumbs.js";
@@ -56,6 +57,8 @@ function init(options: InitOptions = {}): void {
   breadcrumbs = new BreadcrumbBuffer(configuration.maxBreadcrumbs);
   if (captureGlobals) {
     installGlobalHandlers(client, breadcrumbs);
+    // The fatal error the last launch could not deliver, if any.
+    void client.sendStored();
   } else {
     uninstallGlobalHandlers();
   }

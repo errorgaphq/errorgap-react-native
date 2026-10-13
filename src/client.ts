@@ -6,12 +6,9 @@ import { logLevelRank, normalizeLogLevel } from "./logs.js";
 import { VERSION } from "./version.js";
 import { currentTransactionId } from "./transaction-context.js";
 
-export interface DeliveryResult {
-  status?: number;
-  body?: string;
-  error?: unknown;
-  queued?: boolean;
-}
+import { Delivery, type DeliveryResult } from "./delivery.js";
+
+export type { DeliveryResult } from "./delivery.js";
 
 export interface LogOptions {
   source?: string;
@@ -23,8 +20,19 @@ export interface LogOptions {
 /** Told when an error is reported; returns what to call with its group id. */
 export type ErrorObserver = (label: string) => (groupId?: string) => void;
 
+const STORED_FATAL_KEY = "errorgap:pending-fatal-notice";
+
 export class Client {
   private pending = new Set<Promise<unknown>>();
+  private delivery = new Delivery(() => ({
+    endpoint: this.configuration.endpoint,
+    projectSlug: this.configuration.projectSlug,
+    apiKey: this.configuration.apiKey,
+    timeout: this.configuration.timeout,
+    queueSize: this.configuration.queueSize,
+    userAgent: `errorgap-react-native/${VERSION}`,
+    warn: (message) => this.configuration.logger?.warn(message),
+  }));
   private errorObserver: ErrorObserver | undefined;
 
   constructor(private configuration: Configuration) {}
@@ -42,21 +50,39 @@ export class Client {
     error: unknown,
     options: NoticeContext & { sync?: boolean } = {},
   ): Promise<DeliveryResult> {
+    // Tracked from the first moment, so `flush()` right after `notify()`
+    // waits for the notice even while it is still being prepared.
+    const operation = this.process(error, options);
+    this.pending.add(operation);
+    void operation.finally(() => this.pending.delete(operation));
+    if (options.sync || !this.configuration.async) return operation;
+
+    const early = await Promise.race([operation, Promise.resolve(undefined)]);
+    return early ?? { queued: true, status: 202 };
+  }
+
+  private async process(error: unknown, options: NoticeContext): Promise<DeliveryResult> {
     try {
       this.configuration.validate();
       const err = coerceError(error);
-      const notice = buildNotice(err, this.configuration, withTransaction(options));
-      const observed = this.observe(`${notice.errors[0]?.type ?? "Error"}: ${err.message}`);
-      const delivery = this.prepareAndDeliverNotice(notice).then((result) => {
-        observed(groupIdOf(result));
-        return result;
-      });
-      this.track(delivery);
-
-      if (options.sync || !this.configuration.async) {
-        return await delivery;
+      if (this.configuration.ignoredEnvironment()) return { status: 202, body: "ignored environment" };
+      const built = buildNotice(err, this.configuration, withTransaction(options));
+      // A fatal error usually ends the app before the request finishes, so
+      // the notice is kept (before anything asynchronous happens) until the
+      // server has it.
+      const fatal = options.isFatal === true;
+      if (fatal) this.store(built);
+      const notice = await this.runHook(built);
+      if (!notice) {
+        if (fatal) this.clearStored();
+        return { status: 202, body: "dropped by beforeNotify" };
       }
-      return { queued: true, status: 202 };
+      if (fatal && notice !== built) this.store(notice);
+      const observed = this.observe(`${notice.errors[0]?.type ?? "Error"}: ${err.message}`);
+      const result = await this.prepareAndDeliverNotice(notice);
+      observed(groupIdOf(result));
+      if (fatal && result.status !== undefined && result.status < 500) this.clearStored();
+      return result;
     } catch (exception) {
       this.log(exception);
       return { error: exception };
@@ -138,52 +164,79 @@ export class Client {
 
   private async submit(
     resource: string,
-    payload: Record<string, unknown>,
-    sync = false,
+    payload: unknown,
+    sync?: boolean,
   ): Promise<DeliveryResult> {
-    if (sync || !this.configuration.async) {
-      const p = this.deliver(resource, payload);
-      this.track(p);
-      return await p;
-    }
-    this.track(this.deliver(resource, payload));
-    return { queued: true, status: 202 };
+    if (this.configuration.ignoredEnvironment()) return { status: 204 };
+    if (sync || !this.configuration.async) return await this.delivery.send(resource, payload);
+    return this.delivery.enqueue(resource, payload);
   }
 
-  async deliver(resource: string, payload: unknown): Promise<DeliveryResult> {
-    const url = resourceUrl(this.configuration, resource);
-    const headers: Record<string, string> = {
-      "content-type": "application/json",
-      "user-agent": `errorgap-react-native/${VERSION}`,
-    };
-    if (this.configuration.apiKey) {
-      headers["x-errorgap-project-key"] = this.configuration.apiKey;
-    }
+  deliver(resource: string, payload: unknown): Promise<DeliveryResult> {
+    return this.delivery.send(resource, payload);
+  }
 
+  /** Await everything queued or being sent. Use during graceful shutdown. */
+  async flush(): Promise<void> {
+    while (this.pending.size > 0) {
+      await Promise.all(Array.from(this.pending).map((p) => p.catch(() => undefined)));
+    }
+    await this.delivery.flush();
+  }
+
+  /**
+   * Send the fatal error the previous launch could not deliver, if there is
+   * one. Called from `init`; needs `storage`.
+   */
+  async sendStored(): Promise<DeliveryResult | undefined> {
+    const storage = this.configuration.storage;
+    if (!storage) return undefined;
     try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(payload),
-      });
-      const body = await safeBody(response);
-      return { status: response.status, body };
+      const stored = await storage.getItem(STORED_FATAL_KEY);
+      if (!stored) return undefined;
+      const result = await this.delivery.send("notices", JSON.parse(stored));
+      // Kept only while the server could not be reached.
+      if (result.status !== undefined && result.status < 500) await storage.removeItem(STORED_FATAL_KEY);
+      return result;
     } catch (exception) {
       this.log(exception);
       return { error: exception };
     }
   }
 
-  async flush(): Promise<void> {
-    while (this.pending.size > 0) {
-      await Promise.all(Array.from(this.pending));
+  private store(notice: NoticePayload): void {
+    try {
+      void this.configuration.storage
+        ?.setItem(STORED_FATAL_KEY, JSON.stringify(notice))
+        .catch(() => undefined);
+    } catch {
+      // Storage is best-effort.
     }
   }
 
-  private track(promise: Promise<unknown>): void {
-    const wrapped = promise.catch(() => undefined);
-    this.pending.add(wrapped);
-    void wrapped.finally(() => this.pending.delete(wrapped));
+  private clearStored(): void {
+    try {
+      void this.configuration.storage?.removeItem(STORED_FATAL_KEY).catch(() => undefined);
+    } catch {
+      // Storage is best-effort.
+    }
+  }
+
+  /**
+   * A hook that throws is logged and skipped: a bug in a filter must not
+   * lose the error it was filtering.
+   */
+  private async runHook(notice: NoticePayload): Promise<NoticePayload | null> {
+    const hook = this.configuration.beforeNotify;
+    if (!hook) return notice;
+    try {
+      const result = await hook(notice);
+      if (result === false || result === null) return null;
+      return result && typeof result === "object" && Array.isArray(result.errors) ? result : notice;
+    } catch (exception) {
+      this.log(exception);
+      return notice;
+    }
   }
 
   private log(exception: unknown): void {
@@ -194,21 +247,6 @@ export class Client {
         ? `${exception.name}: ${exception.message}`
         : String(exception);
     logger.warn(`[errorgap] ${message}`);
-  }
-}
-
-function resourceUrl(configuration: Configuration, resource: string): string {
-  const base = configuration.endpoint.endsWith("/")
-    ? configuration.endpoint.slice(0, -1)
-    : configuration.endpoint;
-  return `${base}/api/projects/${configuration.projectSlug}/${resource}`;
-}
-
-async function safeBody(response: Response): Promise<string> {
-  try {
-    return await response.text();
-  } catch {
-    return "";
   }
 }
 
