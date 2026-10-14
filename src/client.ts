@@ -1,4 +1,5 @@
 import type { Configuration } from "./configuration.js";
+import { RemoteSettings, type RemoteKind } from "./remote-settings.js";
 import { buildNotice, type NoticeContext, type NoticePayload } from "./notice.js";
 import { enrichBacktrace } from "./source-maps.js";
 import { transactionPayload, type Transaction } from "./apm.js";
@@ -22,8 +23,17 @@ export type ErrorObserver = (label: string) => (groupId?: string) => void;
 
 const STORED_FATAL_KEY = "errorgap:pending-fatal-notice";
 
+/** Which of the project's switches covers each kind of payload. */
+const REMOTE_KINDS: Record<string, RemoteKind | undefined> = {
+  notices: "errors",
+  transactions: "apm",
+  logs: "logs",
+};
+
 export class Client {
   private pending = new Set<Promise<unknown>>();
+  /** What errorgap wants this app to send (the project's remote settings). */
+  readonly remote = new RemoteSettings(() => this.configuration);
   private delivery = new Delivery(() => ({
     endpoint: this.configuration.endpoint,
     projectSlug: this.configuration.projectSlug,
@@ -66,6 +76,9 @@ export class Client {
       this.configuration.validate();
       const err = coerceError(error);
       if (this.configuration.ignoredEnvironment()) return { status: 202, body: "ignored environment" };
+      if (!this.remote.enabled("errors")) {
+        return { status: 202, body: "errors are switched off for this project" };
+      }
       const built = buildNotice(err, this.configuration, withTransaction(options));
       // A fatal error usually ends the app before the request finishes, so
       // the notice is kept (before anything asynchronous happens) until the
@@ -168,6 +181,8 @@ export class Client {
     sync?: boolean,
   ): Promise<DeliveryResult> {
     if (this.configuration.ignoredEnvironment()) return { status: 204 };
+    const kind = REMOTE_KINDS[resource];
+    if (kind && !this.remote.enabled(kind)) return { status: 204 };
     if (sync || !this.configuration.async) return await this.delivery.send(resource, payload);
     return this.delivery.enqueue(resource, payload);
   }

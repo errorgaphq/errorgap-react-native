@@ -33,6 +33,11 @@ export interface ConfigurationInput {
   filterKeys?: FilterKey[];
   beforeNotify?: BeforeNotify;
   /**
+   * Follow the project's settings in errorgap (Project settings › What SDKs
+   * send): stop sending what is switched off there. Defaults to true.
+   */
+  remoteSettings?: boolean;
+  /**
    * Where a fatal error is kept until it has been sent, so one that crashes
    * the app before the request finishes goes out on the next launch. Pass
    * `AsyncStorage` (or anything with the same three methods).
@@ -68,6 +73,12 @@ export interface ConfigurationInput {
   maxBreadcrumbs?: number;
 }
 
+// On unless ERRORGAP_REMOTE_SETTINGS=false (where there is an environment
+// to read: tests and server-side rendering).
+const REMOTE_SETTINGS_DEFAULT =
+  (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
+    ?.ERRORGAP_REMOTE_SETTINGS !== "false";
+
 const DEFAULT_FILTER_KEYS = [
   "password",
   "password_confirmation",
@@ -89,6 +100,7 @@ export class Configuration {
   logger: Logger | null;
   filterKeys: FilterKey[];
   beforeNotify: BeforeNotify | undefined;
+  remoteSettings: boolean;
   storage: NoticeStorage | undefined;
   ignoreEnvironments: string[];
   timeout: number;
@@ -112,6 +124,7 @@ export class Configuration {
     this.logger = input.logger === undefined ? safeConsole() : input.logger;
     this.filterKeys = input.filterKeys ?? [...DEFAULT_FILTER_KEYS];
     this.beforeNotify = input.beforeNotify;
+    this.remoteSettings = input.remoteSettings ?? REMOTE_SETTINGS_DEFAULT;
     this.storage = input.storage;
     this.ignoreEnvironments = input.ignoreEnvironments ?? [];
     this.timeout = input.timeout ?? 5;

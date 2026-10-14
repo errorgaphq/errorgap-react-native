@@ -98,6 +98,15 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 Errorgap.init({ projectSlug: "my-app", storage: AsyncStorage });
 ```
 
+## Remote settings
+
+Errors, performance data and logs can each be switched off for a project in
+errorgap (Project settings › What SDKs send). Running apps follow within ten
+minutes, with no deploy or release: the SDK re-reads
+`GET /api/projects/:slug/config` in the background. If errorgap cannot be
+reached, everything stays on. `remoteSettings: false` ignores the project's
+switches.
+
 ## Breadcrumbs
 
 Record navigation, taps, and requests; the recent trail is attached to every
