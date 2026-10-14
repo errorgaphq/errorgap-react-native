@@ -63,6 +63,50 @@ Nested errors are captured automatically: pass a chain built with
 `new Error("…", { cause })` and each cause's type/message lands in
 `context.causes` while its frames merge into the backtrace.
 
+## Filtering, hooks and delivery
+
+```ts
+Errorgap.init({
+  filterKeys: ["password", "token", /^ssn$/],
+  ignoreEnvironments: ["test"],
+  beforeNotify(notice) {
+    if (notice.errors[0]?.type === "AbortError") return false; // drop it
+    notice.context.team = "billing";                            // or change it
+  },
+});
+
+Errorgap.notify(err, { user: { id: account.id, email: account.email } });
+```
+
+`filterKeys` (substrings or regexps) are masked at any depth in `params` and
+`session`. Values that cannot be serialized (cycles, bigints) and oversized
+strings or collections are cut rather than losing the notice.
+
+Payloads are queued (at most `queueSize`, oldest dropped first) and sent a few
+at a time, each with a `timeout`. A send that fails on the network or with a
+5xx is retried up to three times; after a 429 the SDK stops sending for the
+server's `Retry-After`.
+
+### Fatal errors
+
+A fatal JS error usually closes the app before its report has been sent. Give
+the SDK somewhere to keep it and it goes out on the next launch:
+
+```ts
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+Errorgap.init({ projectSlug: "my-app", storage: AsyncStorage });
+```
+
+## Remote settings
+
+Errors, performance data and logs can each be switched off for a project in
+errorgap (Project settings › What SDKs send). Running apps follow within ten
+minutes, with no deploy or release: the SDK re-reads
+`GET /api/projects/:slug/config` in the background. If errorgap cannot be
+reached, everything stays on. `remoteSettings: false` ignores the project's
+switches.
+
 ## Breadcrumbs
 
 Record navigation, taps, and requests; the recent trail is attached to every
